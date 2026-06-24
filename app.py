@@ -2624,10 +2624,6 @@ def get_revision_status_for_surah(surah_name, today, apply_cycle_reset=True):
         eligible_ayahs.append(ayah)
 
     cycle_completed = False
-    if apply_cycle_reset and not eligible_ayahs and memorized_list:
-        eligible_ayahs = memorized_list.copy()
-        recently_revised = []
-        cycle_completed = True
 
     return memorized_list, rev_dates, eligible_ayahs, recently_revised, cycle_completed
 
@@ -3158,12 +3154,18 @@ def render_memorization_revision_page(today):
         st.warning("No Surahs are assigned by parent yet. Please ask parent to assign at least one Surah in Parents > Manage Quran.")
         return
 
-    if st.session_state.get("selected_surah") not in assigned_surahs:
-        st.session_state["selected_surah"] = assigned_surahs[0]
+    sorted_assigned_surahs = sorted(
+        assigned_surahs,
+        key=lambda surah: int(str(surah).split(".", 1)[0]),
+        reverse=False,
+    )
+
+    if st.session_state.get("selected_surah") not in sorted_assigned_surahs:
+        st.session_state["selected_surah"] = sorted_assigned_surahs[0]
 
     surah_choice = st.selectbox(
         "📖 Select a Surah",
-        options=assigned_surahs,
+        options=sorted_assigned_surahs,
         key="selected_surah",
     )
     st.session_state["hifdh_selected_surah"] = surah_choice
