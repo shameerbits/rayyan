@@ -2962,8 +2962,13 @@ def render_sidebar_profile(
         )
 
         st.markdown("---")
-        st.markdown("💡 **Tip**: Memorize at least 1 Ayah or revise every day to keep your streak burning! 🔥")
-
+        st.markdown("""
+        💡 **Point Rules**
+        - 🟢 **+5 Points** for every **new Ayah memorized**
+        - 🔵 **+2 Points** for every **Ayah revised**
+        - 🔥 Keep your daily streak alive by memorizing **at least 1 Ayah** or doing a revision every day.
+        - 🔴 **−10 Points** if you don't memorize or revise any Ayah for **3 consecutive days**.
+        """)
         st.markdown("---")
         tier_labels = {
             "phone": "Phone",
