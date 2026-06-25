@@ -42,6 +42,71 @@ XP_PER_AYAH_REVISED = 2
 INACTIVITY_DAYS_THRESHOLD = 3
 INACTIVITY_XP_PENALTY = 10
 
+RESPONSIVE_TIERS = ("phone", "tablet", "laptop")
+RESPONSIVE_BREAKPOINTS = {
+    "phone_max": 767,
+    "tablet_max": 1199,
+}
+
+
+def get_ui_tier():
+    tier = str(st.session_state.get("ui_tier", "laptop"))
+    if tier not in RESPONSIVE_TIERS:
+        return "laptop"
+    return tier
+
+
+def get_responsive_value(phone_value, tablet_value, laptop_value):
+    tier = get_ui_tier()
+    if tier == "phone":
+        return phone_value
+    if tier == "tablet":
+        return tablet_value
+    return laptop_value
+
+
+def get_responsive_column_count(phone_cols, tablet_cols, laptop_cols):
+    cols = int(get_responsive_value(phone_cols, tablet_cols, laptop_cols))
+    return max(1, cols)
+
+
+def chunk_items_for_columns(items, columns):
+    safe_columns = max(1, int(columns))
+    return [items[i:i + safe_columns] for i in range(0, len(items), safe_columns)]
+
+
+def sanitize_widget_key(raw_value):
+    sanitized = re.sub(r"[^a-zA-Z0-9_]+", "_", str(raw_value)).strip("_").lower()
+    return sanitized or "item"
+
+
+def render_ayah_status_grid(total_ayahs, columns, status_builder):
+    safe_columns = max(1, int(columns))
+    for row_start in range(1, total_ayahs + 1, safe_columns):
+        row_ayahs = list(range(row_start, min(row_start + safe_columns, total_ayahs + 1)))
+        row_columns = st.columns(len(row_ayahs))
+        for idx, ayah_number in enumerate(row_ayahs):
+            emoji, tooltip = status_builder(ayah_number)
+            with row_columns[idx]:
+                st.markdown(
+                    f"<div style='text-align: center; font-size: 1.1rem;' title='{tooltip}'>{emoji}<br/><span style='font-size: 0.7rem; color: #666;'>{ayah_number}</span></div>",
+                    unsafe_allow_html=True,
+                )
+
+
+def render_ayah_checkbox_grid(ayah_numbers, columns, key_prefix):
+    selected = []
+    safe_columns = max(1, int(columns))
+    for row_start in range(0, len(ayah_numbers), safe_columns):
+        row_ayahs = ayah_numbers[row_start:row_start + safe_columns]
+        row_columns = st.columns(len(row_ayahs))
+        for idx, ayah_number in enumerate(row_ayahs):
+            with row_columns[idx]:
+                checkbox_key = f"{key_prefix}_{ayah_number}"
+                if st.checkbox(f"{ayah_number}", key=checkbox_key):
+                    selected.append(ayah_number)
+    return selected
+
 
 def build_persisted_state_payload():
     payload = {"schema_version": STATE_SCHEMA_VERSION}
@@ -150,12 +215,17 @@ NAV_ITEMS = [
 st.markdown("""
 <style>
 :root{
+    --bp-phone-max: 767px;
+    --bp-tablet-max: 1199px;
     --space-16:16px;
     --space-24:24px;
     --space-32:32px;
+    --layout-max-phone: 100%;
+    --layout-max-tablet: 1024px;
+    --layout-max-laptop: 1280px;
 }
 .block-container{
-    max-width:1100px;
+    max-width:var(--layout-max-laptop);
     margin:auto;
     padding-top:var(--space-16);
     padding-bottom:3rem;
@@ -181,8 +251,24 @@ h3 {
     min-height:52px;
     border-radius:16px;
 }
-@media (min-width:1400px){
-    .block-container{max-width:1400px;}
+@media (max-width: 1199px){
+    .block-container{max-width:var(--layout-max-tablet);}
+    [data-testid="stSidebar"]{width:260px !important;}
+}
+@media (max-width: 767px){
+    :root{
+        --space-16:12px;
+        --space-24:16px;
+        --space-32:20px;
+    }
+    .block-container{
+        max-width:var(--layout-max-phone);
+        padding-left:12px;
+        padding-right:12px;
+        padding-bottom:2rem;
+    }
+    [data-testid="stSidebar"]{width:100% !important;}
+    .stButton button{min-height:46px;}
 }
 </style>
 """, unsafe_allow_html=True)
@@ -500,6 +586,22 @@ st.markdown("""
         font-size: 0.95rem;
         font-weight: 800;
         line-height: 1.3;
+    }
+
+    .top-nav-row {
+        margin-bottom: 10px;
+    }
+
+    @media (max-width: 767px) {
+        .top-nav-row {
+            margin-bottom: 8px;
+        }
+        .top-nav-row .stButton > button {
+            min-height: 44px;
+            font-size: 0.9rem;
+            padding-left: 10px;
+            padding-right: 10px;
+        }
     }
 
     /* Journey to Jannah road scene */
@@ -1310,6 +1412,17 @@ st.markdown("""
         border-radius: 14px;
     }
 
+    .stMultiSelect [data-baseweb="tag"] {
+        max-width: 100%;
+    }
+
+    .stMultiSelect [data-baseweb="tag"] span {
+        white-space: normal !important;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        line-height: 1.2;
+    }
+
     div[class*="st-key-mem_tile_"] div[data-testid="stButton"] > button,
     div[class*="st-key-rev_tile_"] div[data-testid="stButton"] > button {
         min-height: 48px;
@@ -1428,7 +1541,7 @@ st.markdown("""
         }
     }
 
-    @media (max-width: 640px) {
+    @media (max-width: 767px) {
         .overall-grid {
             grid-template-columns: 1fr;
         }
@@ -1445,6 +1558,10 @@ st.markdown("""
             min-height: 44px;
             font-size: 0.76rem;
             padding: 8px;
+        }
+
+        .stMultiSelect [data-baseweb="tag"] {
+            font-size: 0.76rem;
         }
     }
 
@@ -2665,6 +2782,8 @@ if 'assigned_surahs' not in st.session_state:
     st.session_state.assigned_surahs = DEFAULT_ASSIGNED_SURAHS.copy()
 if 'last_level_checkpoint' not in st.session_state:
     st.session_state.last_level_checkpoint = get_level_from_memorized_ayahs(get_total_memorized_ayahs())
+if 'ui_tier' not in st.session_state:
+    st.session_state.ui_tier = "laptop"
 
 st.session_state.milestone_catalog = normalize_milestone_catalog(st.session_state.milestone_catalog)
 st.session_state.assigned_surahs = normalize_assigned_surahs(st.session_state.assigned_surahs)
@@ -2846,6 +2965,26 @@ def render_sidebar_profile(
         st.markdown("💡 **Tip**: Memorize at least 1 Ayah or revise every day to keep your streak burning! 🔥")
 
         st.markdown("---")
+        tier_labels = {
+            "phone": "Phone",
+            "tablet": "iPad",
+            "laptop": "Laptop",
+        }
+        current_tier = get_ui_tier()
+        selected_tier = st.radio(
+            "Responsive Preview",
+            options=list(tier_labels.keys()),
+            index=list(tier_labels.keys()).index(current_tier),
+            format_func=lambda key: tier_labels[key],
+            horizontal=True,
+            key="ui_tier_radio",
+            help="Uses one shared layout path with adaptive density settings.",
+        )
+        if selected_tier != current_tier:
+            st.session_state.ui_tier = selected_tier
+            st.rerun()
+
+        st.markdown("---")
         st.markdown("### 🧭 More")
         if st.button(
             "📜 Journal",
@@ -2867,7 +3006,7 @@ def render_sidebar_profile(
 
 
 def render_top_navigation():
-    row_size = 4
+    row_size = get_responsive_column_count(1, 2, 4)
     for row_start in range(0, len(NAV_ITEMS), row_size):
         row_items = NAV_ITEMS[row_start:row_start + row_size]
         st.markdown("<div class='top-nav-row'>", unsafe_allow_html=True)
@@ -3084,62 +3223,64 @@ def render_surah_browser(today, key_prefix, description_text):
         if entry["surah"] != "N/A":
             surah_xp_totals[entry["surah"]] = surah_xp_totals.get(entry["surah"], 0) + entry["points"]
 
-    tile_cols = st.columns(3)
-    for idx, surah in enumerate(SURAH_LIST):
-        total = get_ayah_count(surah)
-        mem_list = st.session_state.memorized.get(surah, [])
-        mem_count = len(mem_list)
-        mem_label, mem_icon = get_mem_status(mem_count, total)
+    tile_columns = get_responsive_column_count(1, 2, 3)
+    for tile_row in chunk_items_for_columns(list(enumerate(SURAH_LIST)), tile_columns):
+        row_cols = st.columns(len(tile_row))
+        for col_idx, (idx, surah) in enumerate(tile_row):
+            total = get_ayah_count(surah)
+            mem_list = st.session_state.memorized.get(surah, [])
+            mem_count = len(mem_list)
+            mem_label, mem_icon = get_mem_status(mem_count, total)
 
-        _, _, eligible_preview, locked_preview, _ = get_revision_status_for_surah(surah, today, apply_cycle_reset=False)
-        locked_count = len(locked_preview)
-        ready_count = len(eligible_preview)
+            _, _, eligible_preview, locked_preview, _ = get_revision_status_for_surah(surah, today, apply_cycle_reset=False)
+            locked_count = len(locked_preview)
+            ready_count = len(eligible_preview)
 
-        if mem_count == 0:
-            rev_label = "None"
-            rev_icon = "⬜"
-        elif ready_count == 0 and locked_count > 0:
-            rev_label = "Locked"
-            rev_icon = "🟡"
-        else:
-            rev_label = "Ready"
-            rev_icon = "🟢"
+            if mem_count == 0:
+                rev_label = "None"
+                rev_icon = "⬜"
+            elif ready_count == 0 and locked_count > 0:
+                rev_label = "Locked"
+                rev_icon = "🟡"
+            else:
+                rev_label = "Ready"
+                rev_icon = "🟢"
 
-        completion_pct = (mem_count / total) * 100 if total else 0
+            completion_pct = (mem_count / total) * 100 if total else 0
 
-        if mem_count == 0:
-            status_text = "⚪ Not Started"
-            status_class = "status-notstarted"
-        elif mem_count >= total and ready_count == 0 and locked_count > 0:
-            status_text = "🟢 Complete"
-            status_class = "status-complete"
-        elif ready_count > 0:
-            status_text = "🟠 Revision Needed"
-            status_class = "status-revision"
-        else:
-            status_text = "🔵 In Progress"
-            status_class = "status-inprogress"
+            if mem_count == 0:
+                status_text = "⚪ Not Started"
+                status_class = "status-notstarted"
+            elif mem_count >= total and ready_count == 0 and locked_count > 0:
+                status_text = "🟢 Complete"
+                status_class = "status-complete"
+            elif ready_count > 0:
+                status_text = "🟠 Revision Needed"
+                status_class = "status-revision"
+            else:
+                status_text = "🔵 In Progress"
+                status_class = "status-inprogress"
 
-        surah_xp = surah_xp_totals.get(surah, 0)
-        is_selected = st.session_state["selected_surah"] == surah
+            surah_xp = surah_xp_totals.get(surah, 0)
+            is_selected = st.session_state["selected_surah"] == surah
 
-        with tile_cols[idx % 3]:
-            surah_short = get_surah_short_name(surah)
-            st.markdown(
-                f"""<div class="surah-card"><h4 class="surah-card-title">📖 {surah_short}</h4><span class="surah-status-badge {status_class}">{status_text}</span><div class="surah-meta-row"><span>Memorization Progress</span><span>{mem_count}/{total} ({mem_icon} {mem_label})</span></div><div class="surah-progress-track"><div class="surah-progress-fill-mem" style="width: {completion_pct:.1f}%;"></div></div><div class="surah-meta-row"><span>Revision Progress</span><span>{ready_count}/{mem_count if mem_count else 0} ({rev_icon} {rev_label})</span></div><div class="surah-progress-track"><div class="surah-progress-fill-rev" style="width: {(ready_count / mem_count * 100) if mem_count else 0:.1f}%;"></div></div><div class="surah-meta-row"><span>Completion</span><span>{completion_pct:.1f}%</span></div><div class="surah-footer">⭐ XP from this Surah: {surah_xp if surah_xp else 'No XP logged yet'}</div></div>""",
-                unsafe_allow_html=True,
-            )
+            with row_cols[col_idx]:
+                surah_short = get_surah_short_name(surah)
+                st.markdown(
+                    f"""<div class="surah-card"><h4 class="surah-card-title">📖 {surah_short}</h4><span class="surah-status-badge {status_class}">{status_text}</span><div class="surah-meta-row"><span>Memorization Progress</span><span>{mem_count}/{total} ({mem_icon} {mem_label})</span></div><div class="surah-progress-track"><div class="surah-progress-fill-mem" style="width: {completion_pct:.1f}%;"></div></div><div class="surah-meta-row"><span>Revision Progress</span><span>{ready_count}/{mem_count if mem_count else 0} ({rev_icon} {rev_label})</span></div><div class="surah-progress-track"><div class="surah-progress-fill-rev" style="width: {(ready_count / mem_count * 100) if mem_count else 0:.1f}%;"></div></div><div class="surah-meta-row"><span>Completion</span><span>{completion_pct:.1f}%</span></div><div class="surah-footer">⭐ XP from this Surah: {surah_xp if surah_xp else 'No XP logged yet'}</div></div>""",
+                    unsafe_allow_html=True,
+                )
 
-            if st.button(
-                "Continue with this Surah",
-                key=f"{key_prefix}_tile_{idx}",
-                width="stretch",
-                type="primary" if is_selected else "secondary",
-            ):
-                st.session_state["selected_surah"] = surah
-                st.session_state["hifdh_selected_surah"] = surah
-                st.session_state["murajah_selected_surah"] = surah
-                st.rerun()
+                if st.button(
+                    "Continue with this Surah",
+                    key=f"{key_prefix}_tile_{sanitize_widget_key(surah)}",
+                    width="stretch",
+                    type="primary" if is_selected else "secondary",
+                ):
+                    st.session_state["selected_surah"] = surah
+                    st.session_state["hifdh_selected_surah"] = surah
+                    st.session_state["murajah_selected_surah"] = surah
+                    st.rerun()
 
     return st.session_state["selected_surah"]
 
@@ -3180,13 +3321,17 @@ def render_memorization_revision_page(today):
         apply_cycle_reset=False,
     )
 
-    summary_cols = st.columns(3)
-    with summary_cols[0]:
-        st.metric("📖 Memorized", f"{memorized_count}/{total_hifdh_ayahs}")
-    with summary_cols[1]:
-        st.metric("🟢 Ready for Revision", len(eligible_preview))
-    with summary_cols[2]:
-        st.metric("🟡 Locked", len(locked_preview))
+    summary_items = [
+        ("📖 Memorized", f"{memorized_count}/{total_hifdh_ayahs}"),
+        ("🟢 Ready for Revision", len(eligible_preview)),
+        ("🟡 Locked", len(locked_preview)),
+    ]
+    summary_cols_per_row = get_responsive_column_count(1, 2, 3)
+    for summary_row in chunk_items_for_columns(summary_items, summary_cols_per_row):
+        summary_cols = st.columns(len(summary_row))
+        for idx, (label, value) in enumerate(summary_row):
+            with summary_cols[idx]:
+                st.metric(label, value)
 
     memorized_list_rev, rev_dates, eligible_ayahs, _, cycle_completed = get_revision_status_for_surah(
         surah_choice,
@@ -3194,7 +3339,15 @@ def render_memorization_revision_page(today):
         apply_cycle_reset=True,
     )
 
-    mem_col, rev_col = st.columns(2, gap="large")
+    split_columns = get_responsive_column_count(1, 2, 2)
+    if split_columns == 1:
+        mem_col = st.container()
+        rev_col = st.container()
+    else:
+        mem_col, rev_col = st.columns(2, gap="large")
+
+    surah_key = sanitize_widget_key(surah_choice)
+    ayah_grid_columns = get_responsive_column_count(4, 6, 10)
 
     with mem_col:
         st.markdown(
@@ -3210,37 +3363,29 @@ def render_memorization_revision_page(today):
 
         memorized_list = st.session_state.memorized.get(surah_choice, [])
         st.markdown(f"##### 📖 Progress Map for: *{surah_short_name}* (🟢 Memorized | ⚪ Not Memorized)")
-        for i in range(1, total_hifdh_ayahs + 1):
-            col_idx = (i - 1) % 10
-            if col_idx == 0:
-                s_row = st.columns(10)
-            is_mem = i in memorized_list
-            emoji = "🟢" if is_mem else "⚪"
-            tooltip = "Memorized" if is_mem else "Not Memorized"
-            with s_row[col_idx]:
-                st.markdown(
-                    f"<div style='text-align: center; font-size: 1.1rem;' title='{tooltip}'>{emoji}<br/><span style='font-size: 0.7rem; color: #666;'>{i}</span></div>",
-                    unsafe_allow_html=True,
-                )
+        render_ayah_status_grid(
+            total_hifdh_ayahs,
+            ayah_grid_columns,
+            lambda ayah_number: (
+                ("🟢", "Memorized") if ayah_number in memorized_list else ("⚪", "Not Memorized")
+            ),
+        )
 
         st.markdown("<br/>", unsafe_allow_html=True)
         remaining_ayahs = [i for i in range(1, total_hifdh_ayahs + 1) if i not in memorized_list]
 
-        with st.form(f"hifdh_form_{surah_choice}", clear_on_submit=False):
+        with st.form(f"hifdh_form_{surah_key}", clear_on_submit=False):
             selected_ayahs = []
             if not remaining_ayahs:
                 st.success("🏆 SubhanAllah! Rayyan has memorized all Ayahs of this Surah! Revision is now available. 🏔️")
                 submit_hifdh = st.form_submit_button("Submit Memorization! 🚀", disabled=True)
             else:
                 st.write("Select the Ayah numbers you memorized today:")
-                cols_per_row = 10
-                for idx, i in enumerate(remaining_ayahs):
-                    col_idx = idx % cols_per_row
-                    if col_idx == 0:
-                        row_cols = st.columns(cols_per_row)
-                    with row_cols[col_idx]:
-                        if st.checkbox(f"{i}", key=f"hifdh_{surah_choice}_{i}"):
-                            selected_ayahs.append(i)
+                selected_ayahs = render_ayah_checkbox_grid(
+                    remaining_ayahs,
+                    ayah_grid_columns,
+                    f"hifdh_{surah_key}",
+                )
                 submit_hifdh = st.form_submit_button("Submit Memorization! 🚀")
 
             if submit_hifdh:
@@ -3278,40 +3423,35 @@ def render_memorization_revision_page(today):
         )
 
         st.markdown(f"##### 🏔️ Revision Map for: *{surah_short_name}* (🟢 Ready | 🟡 Locked | ⚪ Not Memorized)")
-        for i in range(1, total_hifdh_ayahs + 1):
-            col_idx = (i - 1) % 10
-            if col_idx == 0:
-                s_row_rev = st.columns(10)
-
-            if i not in memorized_list_rev:
-                emoji = "⚪"
-                tooltip = "Not Memorized"
-            elif i in eligible_ayahs:
-                emoji = "🟢"
-                tooltip = "Ready to Revise"
-            else:
-                emoji = "🟡"
-                tooltip = f"Revised on {rev_dates.get(str(i))} (Lock is active)"
-
-            with s_row_rev[col_idx]:
-                st.markdown(
-                    f"<div style='text-align: center; font-size: 1.1rem;' title='{tooltip}'>{emoji}<br/><span style='font-size: 0.7rem; color: #666;'>{i}</span></div>",
-                    unsafe_allow_html=True,
+        render_ayah_status_grid(
+            total_hifdh_ayahs,
+            ayah_grid_columns,
+            lambda ayah_number: (
+                ("⚪", "Not Memorized")
+                if ayah_number not in memorized_list_rev
+                else (
+                    ("🟢", "Ready to Revise")
+                    if ayah_number in eligible_ayahs
+                    else ("🟡", f"Revised on {rev_dates.get(str(ayah_number))} (Lock is active)")
                 )
+            ),
+        )
 
         st.markdown("<br/>", unsafe_allow_html=True)
 
         st.markdown("### 📊 Revision Summary")
-        summary_cols = st.columns(3)
-        with summary_cols[0]:
-            st.metric("🟢 Ready Ayahs", len(eligible_ayahs))
-        with summary_cols[1]:
-            st.metric("🟡 Locked Ayahs", len([a for a in memorized_list_rev if a not in eligible_ayahs]))
-        with summary_cols[2]:
-            revised_entries = sum(len(v) for v in st.session_state.revised_dates.values())
-            st.metric("✅ Completed Revisions", revised_entries)
+        revision_summary_items = [
+            ("🟢 Ready Ayahs", len(eligible_ayahs)),
+            ("🟡 Locked Ayahs", len([a for a in memorized_list_rev if a not in eligible_ayahs])),
+            ("✅ Completed Revisions", sum(len(v) for v in st.session_state.revised_dates.values())),
+        ]
+        for summary_row in chunk_items_for_columns(revision_summary_items, summary_cols_per_row):
+            summary_cols = st.columns(len(summary_row))
+            for idx, (label, value) in enumerate(summary_row):
+                with summary_cols[idx]:
+                    st.metric(label, value)
 
-        with st.form(f"murajah_form_{surah_choice}", clear_on_submit=False):
+        with st.form(f"murajah_form_{surah_key}", clear_on_submit=False):
             selected_revised = []
             if not memorized_list_rev:
                 st.warning("⚠️ Rayyan has not memorized any Ayahs in this Surah yet! Memorize first to unlock revision! 🌱")
@@ -3320,14 +3460,11 @@ def render_memorization_revision_page(today):
                 if cycle_completed:
                     st.info("🎉 Full Revision Cycle Completed! All memorized Ayahs are unlocked for revision!")
                 st.write("Select the Ayah numbers you revised today:")
-                cols_per_row = 10
-                for idx, ayah_num in enumerate(eligible_ayahs):
-                    col_idx = idx % cols_per_row
-                    if col_idx == 0:
-                        row_cols = st.columns(cols_per_row)
-                    with row_cols[col_idx]:
-                        if st.checkbox(f"{ayah_num}", key=f"murajah_{surah_choice}_{ayah_num}"):
-                            selected_revised.append(ayah_num)
+                selected_revised = render_ayah_checkbox_grid(
+                    eligible_ayahs,
+                    ayah_grid_columns,
+                    f"murajah_{surah_key}",
+                )
                 submit_murajah = st.form_submit_button("Submit Revision! 🏆")
 
             if submit_murajah and memorized_list_rev:
@@ -3376,16 +3513,19 @@ def render_achievements_rewards_page(current_level, level_title, surahs_complete
             ),
         )
 
-    hero_cols = st.columns(4)
-    with hero_cols[0]:
-        st.metric("✅ Claimed", len(claimed_items))
-    with hero_cols[1]:
-        st.metric("🎁 Ready To Claim", len(ready_items))
-    with hero_cols[2]:
-        st.metric("⏳ In Progress", len(active_items))
-    with hero_cols[3]:
-        completion_pct = (len(claimed_items) / len(milestone_items)) * 100 if milestone_items else 0
-        st.metric("📈 Journey Complete", f"{completion_pct:.0f}%")
+    completion_pct = (len(claimed_items) / len(milestone_items)) * 100 if milestone_items else 0
+    hero_metrics = [
+        ("✅ Claimed", len(claimed_items)),
+        ("🎁 Ready To Claim", len(ready_items)),
+        ("⏳ In Progress", len(active_items)),
+        ("📈 Journey Complete", f"{completion_pct:.0f}%"),
+    ]
+    hero_cols_per_row = get_responsive_column_count(1, 2, 4)
+    for hero_row in chunk_items_for_columns(hero_metrics, hero_cols_per_row):
+        hero_cols = st.columns(len(hero_row))
+        for idx, (label, value) in enumerate(hero_row):
+            with hero_cols[idx]:
+                st.metric(label, value)
 
     if next_item:
         progress_ratio = min(1.0, (next_item["progress"] / next_item["target"])) if next_item["target"] else 0.0
@@ -3434,7 +3574,7 @@ def render_achievements_rewards_page(current_level, level_title, surahs_complete
     def render_milestone_grid(items, card_type):
         if not items:
             return
-        cards_per_row = min(4, len(items))
+        cards_per_row = min(get_responsive_column_count(1, 2, 4), len(items))
         for row_start in range(0, len(items), cards_per_row):
             row_items = items[row_start:row_start + cards_per_row]
             cols = st.columns(cards_per_row, gap="small")
@@ -3555,11 +3695,16 @@ def render_journal_page():
         width="stretch",
     )
 
-    filter_col, search_col = st.columns([1, 2])
-    with filter_col:
+    filter_search_cols = get_responsive_column_count(1, 2, 2)
+    if filter_search_cols == 1:
         date_filter = st.selectbox("Filter", ["Today", "Last 7 Days", "Last 30 Days", "All Time"])
-    with search_col:
         search_term = st.text_input("Search Surah or Activity")
+    else:
+        filter_col, search_col = st.columns([1, 2])
+        with filter_col:
+            date_filter = st.selectbox("Filter", ["Today", "Last 7 Days", "Last 30 Days", "All Time"])
+        with search_col:
+            search_term = st.text_input("Search Surah or Activity")
 
     cutoff_date = None
     if date_filter == "Today":
@@ -3604,33 +3749,49 @@ def render_journal_page():
 def render_parents_page(total_ayahs_memorized):
     st.markdown("## ⚙️ Parents")
     st.markdown("### 📊 Statistics")
-    stat_cols = st.columns(4)
-    with stat_cols[0]:
-        st.metric("✨ Total XP", st.session_state.xp)
-    with stat_cols[1]:
-        st.metric("📖 Total Ayahs Memorized", total_ayahs_memorized)
-    with stat_cols[2]:
-        revised_entries = sum(len(v) for v in st.session_state.revised_dates.values())
-        st.metric("🔁 Total Revisions", revised_entries)
-    with stat_cols[3]:
-        st.metric("🔥 Streak", st.session_state.streak)
+    revised_entries = sum(len(v) for v in st.session_state.revised_dates.values())
+    parent_stats = [
+        ("✨ Total XP", st.session_state.xp),
+        ("📖 Total Ayahs Memorized", total_ayahs_memorized),
+        ("🔁 Total Revisions", revised_entries),
+        ("🔥 Streak", st.session_state.streak),
+    ]
+    parent_stat_cols = get_responsive_column_count(1, 2, 4)
+    for stat_row in chunk_items_for_columns(parent_stats, parent_stat_cols):
+        stat_cols = st.columns(len(stat_row))
+        for idx, (label, value) in enumerate(stat_row):
+            with stat_cols[idx]:
+                st.metric(label, value)
 
     st.markdown("### 📚 Manage Quran")
     st.caption("Select Surahs to assign. Only assigned Surahs will be shown on the Memorization & Revision page.")
 
-    quran_col1, quran_col2 = st.columns([1, 1])
-    with quran_col1:
+    manage_btn_cols = get_responsive_column_count(1, 2, 2)
+    if manage_btn_cols == 1:
         if st.button("Assign All Surahs", width="stretch"):
             st.session_state.assigned_surahs = SURAH_LIST.copy()
             ensure_selection_state()
             st.success("All Surahs assigned.")
             st.rerun()
-    with quran_col2:
         if st.button("Keep Only Last 10 Surahs", width="stretch"):
             st.session_state.assigned_surahs = SURAH_LIST[-10:]
             ensure_selection_state()
             st.success("Assigned last 10 Surahs.")
             st.rerun()
+    else:
+        quran_col1, quran_col2 = st.columns([1, 1])
+        with quran_col1:
+            if st.button("Assign All Surahs", width="stretch"):
+                st.session_state.assigned_surahs = SURAH_LIST.copy()
+                ensure_selection_state()
+                st.success("All Surahs assigned.")
+                st.rerun()
+        with quran_col2:
+            if st.button("Keep Only Last 10 Surahs", width="stretch"):
+                st.session_state.assigned_surahs = SURAH_LIST[-10:]
+                ensure_selection_state()
+                st.success("Assigned last 10 Surahs.")
+                st.rerun()
 
     assigned_default = get_assigned_surahs()
     with st.form("manage_quran_assignment_form"):
@@ -3791,8 +3952,8 @@ def render_parents_page(total_ayahs_memorized):
                 confirm_rule_change = st.checkbox("I confirm I want to change goal type/target for this claimed milestone.")
 
             if st.button("Save Milestone Updates", width="stretch", type="primary"):
-                title_clean = updated_title.strip()
-                reward_clean = updated_reward.strip() or "🎁 Custom Reward"
+                title_clean = str(updated_title or "").strip()
+                reward_clean = str(updated_reward or "").strip() or "🎁 Custom Reward"
                 if not title_clean:
                     st.error("Title is required.")
                 elif not confirm_rule_change:
@@ -3981,6 +4142,7 @@ if selected_page == "🏠 Dashboard":
         total_ayahs_memorized,
         len(SURAH_LIST),
         get_milestone_items,
+        ui_tier=get_ui_tier(),
     )
 elif selected_page == "📖 Memorization & Revision":
     render_memorization_revision_page(today)

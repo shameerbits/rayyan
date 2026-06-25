@@ -10,6 +10,23 @@ from game_scene_section import build_game_hero_scene_html
 
 AYAHS_PER_LEVEL = 104
 MAX_LEVEL = 60
+RESPONSIVE_TIERS = {"phone", "tablet", "laptop"}
+
+
+def normalize_ui_tier(ui_tier):
+    safe_tier = str(ui_tier or "laptop").lower().strip()
+    if safe_tier not in RESPONSIVE_TIERS:
+        return "laptop"
+    return safe_tier
+
+
+def pick_tier_value(ui_tier, phone_value, tablet_value, laptop_value):
+    safe_tier = normalize_ui_tier(ui_tier)
+    if safe_tier == "phone":
+        return phone_value
+    if safe_tier == "tablet":
+        return tablet_value
+    return laptop_value
 
 LEVEL_TITLES = {
     1: "Beginner",
@@ -369,7 +386,9 @@ def render_dashboard_page(
     total_ayahs_memorized,
     total_surah_count,
     get_milestone_items,
+    ui_tier="laptop",
 ):
+    safe_tier = normalize_ui_tier(ui_tier)
     st.markdown(
         """
         <style>
@@ -456,7 +475,44 @@ def render_dashboard_page(
             white-space: nowrap;
         }
 
+        .game-scene.scene-density-minimal .scene-bird-lane,
+        .game-scene.scene-density-minimal .scene-grain {
+            display: none;
+        }
+        .game-scene.scene-density-minimal .scene-cloud-layer.far {
+            opacity: 0.25;
+        }
+        .game-scene.scene-density-minimal .scene-cloud-layer.mid {
+            opacity: 0.34;
+        }
+        .game-scene.scene-density-balanced .scene-bird-lane {
+            opacity: 0.75;
+        }
+        .game-scene.scene-tier-phone .scene-map-ready-chip {
+            font-size: 0.68rem;
+            padding: 5px 9px;
+        }
+        .game-scene.scene-tier-phone {
+            --reward-card-scale: 0.84;
+            --reward-font-scale: 0.86;
+            --reward-row-bottom: 34px;
+        }
+        .game-scene.scene-tier-phone .road-row {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .game-scene.scene-tier-tablet {
+            --reward-card-scale: 0.92;
+            --reward-font-scale: 0.93;
+            --reward-row-bottom: 26px;
+        }
+        .game-scene.scene-tier-tablet .road-row {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
         .game-scene {
+            --reward-card-scale: 1;
+            --reward-font-scale: 1;
+            --reward-row-bottom: 20px;
             position: relative;
             height: var(--scene-height, 470px);
             border-top: 1px solid rgba(170, 142, 76, 0.3);
@@ -666,7 +722,7 @@ def render_dashboard_page(
             right: 4%;
             bottom: 146px;
             height: 34px;
-            z-index: 5;
+            z-index: 7;
             pointer-events: none;
         }
         .scene-fence::before {
@@ -686,7 +742,7 @@ def render_dashboard_page(
             right: 4%;
             bottom: 40px;
             height: 118px;
-            z-index: 4;
+            z-index: 6;
             pointer-events: none;
         }
         .road-strip {
@@ -721,11 +777,16 @@ def render_dashboard_page(
             display: grid;
             grid-template-columns: repeat(6, minmax(0, 1fr));
             gap: 10px;
-            z-index: 6;
+            z-index: 8;
             padding: 0;
             justify-items: center;
         }
-        .road-row.single { top: -92px; }
+        .road-row.single {
+            top: auto;
+            bottom: var(--reward-row-bottom);
+            transform: scale(var(--reward-card-scale));
+            transform-origin: bottom center;
+        }
 
         .road-board {
             position: relative;
@@ -733,8 +794,8 @@ def render_dashboard_page(
             border: 2px solid #bfd7f6;
             background: rgba(255, 255, 255, 0.78);
             box-shadow: 0 8px 14px rgba(21, 54, 88, 0.18);
-            padding: 8px 10px;
-            min-height: 86px;
+            padding: calc(8px * var(--reward-font-scale)) calc(10px * var(--reward-font-scale));
+            min-height: calc(86px * var(--reward-font-scale));
             width: 100%;
             max-width: none;
             text-align: center;
@@ -762,11 +823,11 @@ def render_dashboard_page(
         }
         .board-title {
             margin: 8px 18px 0 8px;
-            font-size: 12px;
+            font-size: calc(12px * var(--reward-font-scale)) !important;
             font-family: "Baloo 2", "Comic Sans MS", "Trebuchet MS", sans-serif;
             font-weight: 800;
             color: #173e66;
-            line-height: 1.25;
+            line-height: 1.25 !important;
             white-space: normal;
             overflow: visible;
             text-overflow: clip;
@@ -775,11 +836,11 @@ def render_dashboard_page(
         }
         .board-reward {
             margin: 8px 0 0 0;
-            font-size: 12px;
+            font-size: calc(12px * var(--reward-font-scale)) !important;
             font-family: "Baloo 2", "Comic Sans MS", "Trebuchet MS", sans-serif;
             font-weight: 700;
             color: #35608b;
-            line-height: 1.25;
+            line-height: 1.25 !important;
             white-space: normal;
             overflow: visible;
             text-overflow: clip;
@@ -788,11 +849,11 @@ def render_dashboard_page(
         }
         .board-goal {
             margin: 3px 0 0 0;
-            font-size: 12px;
+            font-size: calc(12px * var(--reward-font-scale)) !important;
             font-family: "Baloo 2", "Comic Sans MS", "Trebuchet MS", sans-serif;
             font-weight: 700;
             color: #153c62;
-            line-height: 1.25;
+            line-height: 1.25 !important;
             white-space: normal;
             overflow: visible;
             text-overflow: clip;
@@ -953,7 +1014,12 @@ def render_dashboard_page(
             .game-highlights { grid-template-columns: 1fr 1fr; }
             .road-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         }
-        @media (max-width: 900px) {
+        @media (max-width: 1024px) {
+            .game-scene {
+                --reward-card-scale: 0.9;
+                --reward-font-scale: 0.92;
+                --reward-row-bottom: 26px;
+            }
             .game-scene { height: 600px; }
             .game-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .game-highlights { grid-template-columns: 1fr; }
@@ -964,7 +1030,12 @@ def render_dashboard_page(
             .scene-map-header { flex-direction: column; align-items: flex-start; }
             .scene-map-title-wrap { max-width: 100%; }
         }
-        @media (max-width: 640px) {
+        @media (max-width: 767px) {
+            .game-scene {
+                --reward-card-scale: 0.8;
+                --reward-font-scale: 0.82;
+                --reward-row-bottom: 34px;
+            }
             .game-cards { grid-template-columns: 1fr; }
             .game-progress-grid { grid-template-columns: 1fr; }
             .game-level-badge { width: 100%; }
@@ -972,6 +1043,15 @@ def render_dashboard_page(
             .game-road-layout { height: 220px; }
             .road-strip.single { height: 200px; top: 10px; }
             .road-row { grid-template-columns: 1fr; }
+            .road-row.single {
+                top: auto;
+                bottom: var(--reward-row-bottom);
+                display: flex;
+                flex-direction: column-reverse;
+                align-items: stretch;
+                gap: 8px;
+            }
+            .road-board { width: 100%; }
             .scene-map-header { top: 10px; left: 10px; right: 10px; }
             .scene-map-title { font-size: 1rem; }
             .scene-map-subtitle { font-size: 0.73rem; }
@@ -1008,8 +1088,9 @@ def render_dashboard_page(
 
     character_icon = get_journey_character(current_level)[0]
     character_mode = get_journey_character(current_level)[1]
-    rider_top = "76%"
+    rider_top = pick_tier_value(safe_tier, "78%", "77%", "76%")
     rider_target = 8 + (level_progress_percent / 100.0) * 84
+    scene_density = pick_tier_value(safe_tier, "minimal", "balanced", "rich")
 
     single_boards_html = build_journey_boards_html(single_road_items)
     longest_card_text = 0
@@ -1018,25 +1099,40 @@ def render_dashboard_page(
         goal_text = format_target_label(item)
         longest_card_text = max(longest_card_text, len(reward_text), len(goal_text), len(f"{reward_text} {goal_text}"))
 
-    scene_height_px = 470
+    scene_height_px = int(pick_tier_value(safe_tier, 620, 520, 470))
     if longest_card_text >= 28:
-        scene_height_px = 520
+        scene_height_px = int(pick_tier_value(safe_tier, 660, 560, 520))
     if longest_card_text >= 40:
-        scene_height_px = 560
+        scene_height_px = int(pick_tier_value(safe_tier, 700, 600, 560))
 
     next_level = min(MAX_LEVEL, current_level + 1)
     next_level_title = get_level_title(next_level)
     progress_marker = max(2.0, min(98.0, level_progress_percent))
-    hero_scene_html = build_game_hero_scene_html(
-        character_mode=character_mode,
-        level_progress_percent=level_progress_percent,
-        ready_rewards_count=len(ready_items),
-        single_boards_html=single_boards_html,
-        rider_target=rider_target,
-        rider_top=rider_top,
-        scene_height_px=scene_height_px,
-        character_icon=character_icon,
-    )
+    try:
+        hero_scene_html = build_game_hero_scene_html(
+            character_mode=character_mode,
+            level_progress_percent=level_progress_percent,
+            ready_rewards_count=len(ready_items),
+            single_boards_html=single_boards_html,
+            rider_target=rider_target,
+            rider_top=rider_top,
+            scene_height_px=scene_height_px,
+            character_icon=character_icon,
+            scene_tier=safe_tier,
+            scene_density=scene_density,
+        )
+    except TypeError:
+        # Backward-compatible fallback for hot-reload sessions with stale scene module cache.
+        hero_scene_html = build_game_hero_scene_html(
+            character_mode=character_mode,
+            level_progress_percent=level_progress_percent,
+            ready_rewards_count=len(ready_items),
+            single_boards_html=single_boards_html,
+            rider_target=rider_target,
+            rider_top=rider_top,
+            scene_height_px=scene_height_px,
+            character_icon=character_icon,
+        )
 
     dashboard_html = textwrap.dedent(
         f"""

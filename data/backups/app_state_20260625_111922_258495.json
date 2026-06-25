@@ -3,6 +3,7 @@
   "xp": 60,
   "streak": 1,
   "last_active_date": "2026-06-24",
+  "last_inactivity_penalty_for_date": null,
   "history": [
     {
       "date": "2026-06-24",
@@ -46,7 +47,7 @@
       "5": "2026-06-24"
     }
   },
-  "nav_section": "\ud83d\udcd6 Memorization & Revision",
+  "nav_section": "\ud83c\udfe0 Dashboard",
   "milestone_claims": {
     "surah_1": "2026-06-24"
   },
@@ -579,6 +580,6 @@
     "36. Ya-Sin (Ya-Sin) - 83 Ayahs"
   ],
   "selected_surah": "105. Al-Fil (The Elephant) - 5 Ayahs",
-  "hifdh_selected_surah": "67. Al-Mulk (The Sovereignty) - 30 Ayahs",
-  "murajah_selected_surah": "67. Al-Mulk (The Sovereignty) - 30 Ayahs"
+  "hifdh_selected_surah": "105. Al-Fil (The Elephant) - 5 Ayahs",
+  "murajah_selected_surah": "105. Al-Fil (The Elephant) - 5 Ayahs"
 }
