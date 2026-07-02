@@ -6,17 +6,14 @@ import re
 import importlib
 from PIL import Image
 import os
-import shutil
 
 import dashboard_page
+import database
+import memorization_page
+import revision_page
 
 
-DATA_DIR = "data"
-STATE_FILE = os.path.join(DATA_DIR, "app_state.json")
-BACKUP_DIR = os.path.join(DATA_DIR, "backups")
-STATE_SCHEMA_VERSION = 1
 LOAD_ERROR_SESSION_KEY = "_persistence_load_error"
-MAX_BACKUP_FILES = 25
 PERSISTED_STATE_KEYS = [
     "xp",
     "streak",
@@ -27,6 +24,7 @@ PERSISTED_STATE_KEYS = [
     "recent_praise",
     "memorized",
     "revised_dates",
+    "revision_schedule",
     "nav_section",
     "milestone_claims",
     "milestone_catalog",
@@ -35,11 +33,12 @@ PERSISTED_STATE_KEYS = [
     "selected_surah",
     "hifdh_selected_surah",
     "murajah_selected_surah",
+    "practice_log",
 ]
 
 XP_PER_AYAH_LEARNED = 5
 XP_PER_AYAH_REVISED = 2
-INACTIVITY_DAYS_THRESHOLD = 3
+INACTIVITY_DAYS_THRESHOLD = 2
 INACTIVITY_XP_PENALTY = 10
 
 RESPONSIVE_TIERS = ("phone", "tablet", "laptop")
@@ -108,80 +107,33 @@ def render_ayah_checkbox_grid(ayah_numbers, columns, key_prefix):
     return selected
 
 
-def build_persisted_state_payload():
-    payload = {"schema_version": STATE_SCHEMA_VERSION}
-    for key in PERSISTED_STATE_KEYS:
-        if key in st.session_state:
-            payload[key] = st.session_state[key]
-    return payload
-
-
-def prune_old_backups():
-    if not os.path.isdir(BACKUP_DIR):
-        return
-    backup_entries = []
-    for name in os.listdir(BACKUP_DIR):
-        file_path = os.path.join(BACKUP_DIR, name)
-        if not os.path.isfile(file_path):
-            continue
-        try:
-            modified_time = os.path.getmtime(file_path)
-        except OSError:
-            continue
-        backup_entries.append((modified_time, file_path))
-
-    if len(backup_entries) <= MAX_BACKUP_FILES:
-        return
-
-    backup_entries.sort(key=lambda item: item[0], reverse=True)
-    for _, stale_file in backup_entries[MAX_BACKUP_FILES:]:
-        try:
-            os.remove(stale_file)
-        except OSError:
-            continue
-
-
-def save_app_state():
+def load_app_state() -> None:
+    """Initialise the database and load all persisted values into session state."""
     try:
-        os.makedirs(DATA_DIR, exist_ok=True)
-
-        if os.path.exists(STATE_FILE):
-            os.makedirs(BACKUP_DIR, exist_ok=True)
-            backup_stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            backup_file = os.path.join(BACKUP_DIR, f"app_state_{backup_stamp}.json")
-            shutil.copy2(STATE_FILE, backup_file)
-            prune_old_backups()
-
-        payload = build_persisted_state_payload()
-        temp_file = f"{STATE_FILE}.tmp"
-        with open(temp_file, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2)
-        os.replace(temp_file, STATE_FILE)
-    except Exception:
-        # Persistence issues should not block the learning flow.
-        pass
-
-
-def load_app_state():
-    if not os.path.exists(STATE_FILE):
-        return
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-        if not isinstance(payload, dict):
-            return
-        for key in PERSISTED_STATE_KEYS:
-            if key in payload:
-                st.session_state[key] = payload[key]
+        database.init_db()
+        loaded = database.load_state()
+        for key, value in loaded.items():
+            if value is not None:
+                st.session_state[key] = value
         st.session_state.pop(LOAD_ERROR_SESSION_KEY, None)
-    except json.JSONDecodeError:
+    except Exception as exc:  # noqa: BLE001
         st.session_state[LOAD_ERROR_SESSION_KEY] = (
-            "Saved progress file is malformed JSON. App started with defaults for this session. "
-            "Please fix or remove data/app_state.json."
+            f"Could not load saved progress from database: {exc}. "
+            "App started with defaults for this session."
         )
-    except Exception:
-        # Corrupt or incompatible state should fall back to defaults.
-        return
+
+
+def save_app_state() -> None:
+    """Persist all tracked session-state keys to SQLite."""
+    try:
+        state = {
+            key: st.session_state[key]
+            for key in PERSISTED_STATE_KEYS
+            if key in st.session_state
+        }
+        database.save_state(state)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 _native_rerun = st.rerun
@@ -207,7 +159,8 @@ if LOAD_ERROR_SESSION_KEY in st.session_state:
 
 NAV_ITEMS = [
     "🏠 Dashboard",
-    "📖 Memorization & Revision",
+    "📖 Memorization",
+    "🔁 Revision",
     "🏆 Achievements & Rewards",
 ]
 
@@ -2128,6 +2081,66 @@ st.markdown("""
             bottom: 56px;
         }
     }
+
+    /* ── Memorization page compact layout ── */
+    .hifdh-stats-strip {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 10px;
+    }
+
+    .hifdh-stat {
+        flex: 1;
+        background: #ffffff;
+        border: 2px solid #bbf7d0;
+        border-radius: 12px;
+        padding: 8px 6px;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+    }
+
+    .hifdh-stat-val {
+        color: #14532d;
+        font-size: 1.05rem;
+        font-weight: 800;
+        line-height: 1.1;
+    }
+
+    .hifdh-stat-lbl {
+        color: #166534;
+        font-size: 0.64rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+
+    .hifdh-banner {
+        background: #f0fdf4;
+        border: 1px solid #bbf7d0;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-size: 0.84rem;
+        color: #166534;
+        margin-bottom: 10px;
+        font-weight: 600;
+        line-height: 1.4;
+    }
+
+    @media (max-width: 767px) {
+        .hifdh-stat-val {
+            font-size: 0.95rem;
+        }
+        .hifdh-stat-lbl {
+            font-size: 0.6rem;
+        }
+        .hifdh-banner {
+            font-size: 0.78rem;
+            padding: 6px 10px;
+        }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -2265,7 +2278,7 @@ LEVEL_REWARDS = {
     6: "🎯 Random Fun Surprise Reward!"
 }
 
-AYAHS_PER_LEVEL = 104
+AYAHS_PER_LEVEL = 26
 MAX_LEVEL = 60
 
 LEVEL_TITLES = {
@@ -2745,6 +2758,126 @@ def get_revision_status_for_surah(surah_name, today, apply_cycle_reset=True):
     return memorized_list, rev_dates, eligible_ayahs, recently_revised, cycle_completed
 
 
+# ---------------------------------------------------------------------------
+# Spaced-Repetition System (SRS) helpers
+# ---------------------------------------------------------------------------
+
+_SRS_INTERVALS = [1, 2, 4, 8, 16, 32]
+
+
+def get_next_interval_days(stage: int) -> int:
+    """Return days until the next revision after *stage* revisions have been completed.
+
+    Sequence: 1 → 2 → 4 → 8 → 16 → 32, then cycling 16 → 32 → 16 → 32 → …
+    """
+    if stage < len(_SRS_INTERVALS):
+        return _SRS_INTERVALS[stage]
+    return 16 if (stage - len(_SRS_INTERVALS)) % 2 == 0 else 32
+
+
+def ensure_revision_schedule(today: datetime.date) -> None:
+    """Seed revision_schedule for every memorized ayah that lacks an entry.
+
+    Handles migration from pre-SRS data; those ayahs default to due today so
+    they surface in the Revision page immediately.
+    """
+    if "revision_schedule" not in st.session_state:
+        st.session_state.revision_schedule = {}
+    schedule = st.session_state.revision_schedule
+    today_str = today.isoformat()
+    for surah, ayah_list in st.session_state.get("memorized", {}).items():
+        surah_map = schedule.setdefault(surah, {})
+        for ayah in ayah_list:
+            if str(ayah) not in surah_map:
+                surah_map[str(ayah)] = {
+                    "memorized_date": today_str,
+                    "stage": 0,
+                    "next_due": today_str,
+                    "last_revised": "",
+                    "overdue_penalty_applied": False,
+                }
+
+
+def apply_overdue_penalties_once(today: datetime.date) -> None:
+    """Apply −5 XP once per ayah when it first enters the overdue window (> 3 days past due).
+
+    The overdue_penalty_applied flag makes this fully idempotent across re-runs.
+    """
+    schedule = st.session_state.get("revision_schedule", {})
+    today_str = today.isoformat()
+    for surah, ayah_map in schedule.items():
+        for ayah_str, entry in ayah_map.items():
+            if entry.get("overdue_penalty_applied", False):
+                continue
+            next_due_str = entry.get("next_due", "")
+            if not next_due_str:
+                continue
+            try:
+                next_due = datetime.date.fromisoformat(next_due_str)
+            except ValueError:
+                continue
+            if (today - next_due).days > 3:
+                st.session_state.xp = max(0, st.session_state.xp - 5)
+                entry["overdue_penalty_applied"] = True
+                st.session_state.history.insert(0, {
+                    "date": today_str,
+                    "activity": "Overdue Penalty",
+                    "surah": surah,
+                    "details": f"Ayah {ayah_str} missed the 3-day grace period",
+                    "points": -5,
+                })
+
+
+def classify_revision_ayahs(today: datetime.date):
+    """Partition revision_schedule into four buckets sorted by Quran order.
+
+    Returns (due_today, grace_period, overdue, all_memorized) where each is a
+    list of (surah_name, ayah_str, entry_dict) tuples.
+    """
+    schedule = st.session_state.get("revision_schedule", {})
+    surah_order = {s: i for i, s in enumerate(SURAH_LIST)}
+
+    due_today, grace_period, overdue, all_memorized = [], [], [], []
+
+    for surah in sorted(schedule.keys(), key=lambda s: surah_order.get(s, 9999)):
+        for ayah_str, entry in sorted(schedule[surah].items(), key=lambda kv: int(kv[0])):
+            all_memorized.append((surah, ayah_str, entry))
+            next_due_str = entry.get("next_due", "")
+            if not next_due_str:
+                continue
+            try:
+                next_due = datetime.date.fromisoformat(next_due_str)
+            except ValueError:
+                continue
+            delta = (today - next_due).days
+            if delta == 0:
+                due_today.append((surah, ayah_str, entry))
+            elif 1 <= delta <= 3:
+                grace_period.append((surah, ayah_str, entry))
+            elif delta > 3:
+                overdue.append((surah, ayah_str, entry))
+
+    return due_today, grace_period, overdue, all_memorized
+
+
+def complete_scheduled_revision(surah: str, ayah_str: str, revision_date: datetime.date) -> None:
+    """Advance the SRS entry after a scheduled revision.
+
+    Increments stage, records last_revised, computes next_due from the *actual*
+    revision date (not the original due date), resets the overdue-penalty flag.
+    """
+    schedule = st.session_state.get("revision_schedule", {})
+    entry = schedule.get(surah, {}).get(ayah_str)
+    if entry is None:
+        return
+    new_stage = int(entry.get("stage", 0)) + 1
+    interval = get_next_interval_days(new_stage)
+    entry["stage"] = new_stage
+    entry["last_revised"] = revision_date.isoformat()
+    entry["next_due"] = (revision_date + datetime.timedelta(days=interval)).isoformat()
+    entry["overdue_penalty_applied"] = False
+
+
 # Load persisted state once per browser session before defaults are applied.
 if "_state_loaded" not in st.session_state:
     load_app_state()
@@ -2770,6 +2903,10 @@ if 'memorized' not in st.session_state:
     st.session_state.memorized = {} # surah_name -> list of ints
 if 'revised_dates' not in st.session_state:
     st.session_state.revised_dates = {} # surah_name -> dict(str(ayah) -> iso_date_str)
+if 'revision_schedule' not in st.session_state:
+    st.session_state.revision_schedule = {}  # surah_name -> {ayah_str -> entry_dict}
+if 'practice_log' not in st.session_state:
+    st.session_state.practice_log = {}  # iso_date_str -> {surah_name -> [ayah_ints]}
 if 'nav_section' not in st.session_state:
     st.session_state.nav_section = NAV_ITEMS[0]
 if 'milestone_claims' not in st.session_state:
@@ -2820,17 +2957,18 @@ def apply_inactivity_penalty_if_needed(today):
     if days_without_learning < INACTIVITY_DAYS_THRESHOLD:
         return
 
-    # Apply once per inactivity window (anchored on last active learning date).
-    if st.session_state.get("last_inactivity_penalty_for_date") == last_active_str:
+    # Apply once per calendar day — fires every day of continued inactivity.
+    today_str = today.isoformat()
+    if st.session_state.get("last_inactivity_penalty_for_date") == today_str:
         return
 
     st.session_state.xp = max(0, st.session_state.xp - INACTIVITY_XP_PENALTY)
-    st.session_state.last_inactivity_penalty_for_date = last_active_str
+    st.session_state.last_inactivity_penalty_for_date = today_str
     st.session_state.history.insert(0, {
         "date": today.strftime("%Y-%m-%d"),
         "activity": "Inactivity Penalty",
         "surah": "-",
-        "details": f"No learning for {INACTIVITY_DAYS_THRESHOLD} days",
+        "details": f"No learning for {days_without_learning} day(s)",
         "points": -INACTIVITY_XP_PENALTY,
     })
 
@@ -2907,6 +3045,8 @@ def reset_application_data(preserve_parental_config=False):
     st.session_state.recent_praise = ""
     st.session_state.memorized = {}
     st.session_state.revised_dates = {}
+    st.session_state.revision_schedule = {}
+    st.session_state.practice_log = {}
     st.session_state.milestone_claims = {}
     st.session_state.last_level_checkpoint = get_level_from_memorized_ayahs(0)
     st.session_state.confetti_trigger = False
@@ -2946,7 +3086,7 @@ def render_sidebar_profile(
         avatar_path = "rayyan_avatar.png"
         if os.path.exists(avatar_path):
             image = Image.open(avatar_path)
-            st.image(image, width="stretch", caption="Rayyan the Quran Champion!")
+            st.image(image, use_container_width=True, caption="Rayyan the Quran Champion!")
         else:
             st.markdown("<div style='text-align: center; font-size: 80px;'>🤖</div>", unsafe_allow_html=True)
 
@@ -2967,7 +3107,7 @@ def render_sidebar_profile(
         - 🟢 **+5 Points** for every **new Ayah memorized**
         - 🔵 **+2 Points** for every **Ayah revised**
         - 🔥 Keep your daily streak alive by memorizing **at least 1 Ayah** or doing a revision every day.
-        - 🔴 **−10 Points** if you don't memorize or revise any Ayah for **3 consecutive days**.
+        - 🔴 **−10 Points** every day you don't memorize or revise after **2 consecutive inactive days**.
         """)
         st.markdown("---")
         tier_labels = {
@@ -2994,7 +3134,7 @@ def render_sidebar_profile(
         if st.button(
             "📜 Journal",
             key="sidebar_journal",
-            width="stretch",
+            use_container_width=True,
             type="primary" if st.session_state.nav_section == "📜 Journal" else "secondary",
         ):
             st.session_state.nav_section = "📜 Journal"
@@ -3003,7 +3143,7 @@ def render_sidebar_profile(
         if st.button(
             "⚙️ Parents",
             key="sidebar_parents",
-            width="stretch",
+            use_container_width=True,
             type="primary" if st.session_state.nav_section == "⚙️ Parents" else "secondary",
         ):
             st.session_state.nav_section = "⚙️ Parents"
@@ -3022,7 +3162,7 @@ def render_top_navigation():
                 if st.button(
                     page_label,
                     key=f"nav_tab_{row_start + idx}",
-                    width="stretch",
+                    use_container_width=True,
                     type="primary" if is_active else "secondary",
                 ):
                     st.session_state.nav_section = page_label
@@ -3279,7 +3419,7 @@ def render_surah_browser(today, key_prefix, description_text):
                 if st.button(
                     "Continue with this Surah",
                     key=f"{key_prefix}_tile_{sanitize_widget_key(surah)}",
-                    width="stretch",
+                    use_container_width=True,
                     type="primary" if is_selected else "secondary",
                 ):
                     st.session_state["selected_surah"] = surah
@@ -3288,210 +3428,6 @@ def render_surah_browser(today, key_prefix, description_text):
                     st.rerun()
 
     return st.session_state["selected_surah"]
-
-
-def render_memorization_revision_page(today):
-    st.markdown("## 📖 Memorization & 🔁 Revision")
-    if st.session_state.recent_praise:
-        st.info(st.session_state.recent_praise)
-
-    assigned_surahs = get_assigned_surahs()
-    if not assigned_surahs:
-        st.warning("No Surahs are assigned by parent yet. Please ask parent to assign at least one Surah in Parents > Manage Quran.")
-        return
-
-    sorted_assigned_surahs = sorted(
-        assigned_surahs,
-        key=lambda surah: int(str(surah).split(".", 1)[0]),
-        reverse=False,
-    )
-
-    if st.session_state.get("selected_surah") not in sorted_assigned_surahs:
-        st.session_state["selected_surah"] = sorted_assigned_surahs[0]
-
-    surah_choice = st.selectbox(
-        "📖 Select a Surah",
-        options=sorted_assigned_surahs,
-        key="selected_surah",
-    )
-    st.session_state["hifdh_selected_surah"] = surah_choice
-    st.session_state["murajah_selected_surah"] = surah_choice
-
-    surah_short_name = surah_choice.split("(")[0].strip()
-    total_hifdh_ayahs = get_ayah_count(surah_choice)
-    memorized_count = len(st.session_state.memorized.get(surah_choice, []))
-    _, _, eligible_preview, locked_preview, _ = get_revision_status_for_surah(
-        surah_choice,
-        today,
-        apply_cycle_reset=False,
-    )
-
-    summary_items = [
-        ("📖 Memorized", f"{memorized_count}/{total_hifdh_ayahs}"),
-        ("🟢 Ready for Revision", len(eligible_preview)),
-        ("🟡 Locked", len(locked_preview)),
-    ]
-    summary_cols_per_row = get_responsive_column_count(1, 2, 3)
-    for summary_row in chunk_items_for_columns(summary_items, summary_cols_per_row):
-        summary_cols = st.columns(len(summary_row))
-        for idx, (label, value) in enumerate(summary_row):
-            with summary_cols[idx]:
-                st.metric(label, value)
-
-    memorized_list_rev, rev_dates, eligible_ayahs, _, cycle_completed = get_revision_status_for_surah(
-        surah_choice,
-        today,
-        apply_cycle_reset=True,
-    )
-
-    split_columns = get_responsive_column_count(1, 2, 2)
-    if split_columns == 1:
-        mem_col = st.container()
-        rev_col = st.container()
-    else:
-        mem_col, rev_col = st.columns(2, gap="large")
-
-    surah_key = sanitize_widget_key(surah_choice)
-    ayah_grid_columns = get_responsive_column_count(4, 6, 10)
-
-    with mem_col:
-        st.markdown(
-            """
-            <div class="custom-card">
-                <h3>🌱 Log New Memorization (Hifdh)</h3>
-                <p style="color: #166534;">Ayah-by-Ayah progress. Every single Ayah counts!</p>
-                <p style="font-weight: bold; color: #22c55e;">⭐ +5 XP per Ayah</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        memorized_list = st.session_state.memorized.get(surah_choice, [])
-        st.markdown(f"##### 📖 Progress Map for: *{surah_short_name}* (🟢 Memorized | ⚪ Not Memorized)")
-        render_ayah_status_grid(
-            total_hifdh_ayahs,
-            ayah_grid_columns,
-            lambda ayah_number: (
-                ("🟢", "Memorized") if ayah_number in memorized_list else ("⚪", "Not Memorized")
-            ),
-        )
-
-        st.markdown("<br/>", unsafe_allow_html=True)
-        remaining_ayahs = [i for i in range(1, total_hifdh_ayahs + 1) if i not in memorized_list]
-
-        with st.form(f"hifdh_form_{surah_key}", clear_on_submit=False):
-            selected_ayahs = []
-            if not remaining_ayahs:
-                st.success("🏆 SubhanAllah! Rayyan has memorized all Ayahs of this Surah! Revision is now available. 🏔️")
-                submit_hifdh = st.form_submit_button("Submit Memorization! 🚀", disabled=True)
-            else:
-                st.write("Select the Ayah numbers you memorized today:")
-                selected_ayahs = render_ayah_checkbox_grid(
-                    remaining_ayahs,
-                    ayah_grid_columns,
-                    f"hifdh_{surah_key}",
-                )
-                submit_hifdh = st.form_submit_button("Submit Memorization! 🚀")
-
-            if submit_hifdh:
-                if not selected_ayahs:
-                    st.error("Please select at least one Ayah! 📖")
-                else:
-                    pts = len(selected_ayahs) * XP_PER_AYAH_LEARNED
-                    selected_ayahs.sort()
-
-                    prev_memorized_count = len(st.session_state.memorized.get(surah_choice, []))
-                    current_memorized = set(st.session_state.memorized.get(surah_choice, []))
-                    current_memorized.update(selected_ayahs)
-                    st.session_state.memorized[surah_choice] = sorted(list(current_memorized))
-                    st.session_state["hifdh_selected_surah"] = surah_choice
-
-                    ayah_ranges = f"Ayah(s): {', '.join(map(str, selected_ayahs))}"
-                    add_xp(pts, "Memorization", surah_choice, ayah_ranges)
-                    st.session_state.recent_praise = random.choice(HIFDH_PRAISES) + f" (Log: {ayah_ranges} memorized!)"
-                    st.toast(f"✨ Great job! +{pts} XP from memorization.", icon="📖")
-                    if prev_memorized_count < total_hifdh_ayahs <= len(current_memorized):
-                        st.balloons()
-                        st.toast(f"🏅 Achievement unlocked: Completed {surah_short_name}", icon="🎉")
-                    st.rerun()
-
-    with rev_col:
-        st.markdown(
-            """
-            <div class="custom-card" style="border-color: #fde047; background-color: #fefce8;">
-                <h3>🏔️ Log Revision (Murajah)</h3>
-                <p style="color: #854d0e;">Keep your memorization strong. Revision gets extra rewards!</p>
-                <p style="font-weight: bold; color: #ca8a04;">⭐ +2 XP per Revised Ayah</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(f"##### 🏔️ Revision Map for: *{surah_short_name}* (🟢 Ready | 🟡 Locked | ⚪ Not Memorized)")
-        render_ayah_status_grid(
-            total_hifdh_ayahs,
-            ayah_grid_columns,
-            lambda ayah_number: (
-                ("⚪", "Not Memorized")
-                if ayah_number not in memorized_list_rev
-                else (
-                    ("🟢", "Ready to Revise")
-                    if ayah_number in eligible_ayahs
-                    else ("🟡", f"Revised on {rev_dates.get(str(ayah_number))} (Lock is active)")
-                )
-            ),
-        )
-
-        st.markdown("<br/>", unsafe_allow_html=True)
-
-        st.markdown("### 📊 Revision Summary")
-        revision_summary_items = [
-            ("🟢 Ready Ayahs", len(eligible_ayahs)),
-            ("🟡 Locked Ayahs", len([a for a in memorized_list_rev if a not in eligible_ayahs])),
-            ("✅ Completed Revisions", sum(len(v) for v in st.session_state.revised_dates.values())),
-        ]
-        for summary_row in chunk_items_for_columns(revision_summary_items, summary_cols_per_row):
-            summary_cols = st.columns(len(summary_row))
-            for idx, (label, value) in enumerate(summary_row):
-                with summary_cols[idx]:
-                    st.metric(label, value)
-
-        with st.form(f"murajah_form_{surah_key}", clear_on_submit=False):
-            selected_revised = []
-            if not memorized_list_rev:
-                st.warning("⚠️ Rayyan has not memorized any Ayahs in this Surah yet! Memorize first to unlock revision! 🌱")
-                submit_murajah = st.form_submit_button("Submit Revision! 🏆", disabled=True)
-            else:
-                if cycle_completed:
-                    st.info("🎉 Full Revision Cycle Completed! All memorized Ayahs are unlocked for revision!")
-                st.write("Select the Ayah numbers you revised today:")
-                selected_revised = render_ayah_checkbox_grid(
-                    eligible_ayahs,
-                    ayah_grid_columns,
-                    f"murajah_{surah_key}",
-                )
-                submit_murajah = st.form_submit_button("Submit Revision! 🏆")
-
-            if submit_murajah and memorized_list_rev:
-                if not selected_revised:
-                    st.error("Please select at least one Ayah! 📖")
-                else:
-                    rev_count = len(selected_revised)
-                    pts = rev_count * XP_PER_AYAH_REVISED
-                    selected_revised.sort()
-
-                    if surah_choice not in st.session_state.revised_dates:
-                        st.session_state.revised_dates[surah_choice] = {}
-                    today_str = today.isoformat()
-                    for ayah in selected_revised:
-                        st.session_state.revised_dates[surah_choice][str(ayah)] = today_str
-                    st.session_state["murajah_selected_surah"] = surah_choice
-
-                    ayah_ranges = f"Ayah(s): {', '.join(map(str, selected_revised))}"
-                    add_xp(pts, "Revision", surah_choice, ayah_ranges)
-                    st.session_state.recent_praise = random.choice(MURAJAH_PRAISES) + f" (Log: {ayah_ranges} revised!)"
-                    st.toast(f"🏔️ Strong revision! +{pts} XP earned.", icon="⭐")
-                    st.rerun()
 
 
 def render_achievements_rewards_page(current_level, level_title, surahs_completed, juz_completion_pct, total_ayahs_memorized):
@@ -3587,7 +3523,7 @@ def render_achievements_rewards_page(current_level, level_title, surahs_complete
                 with cols[idx]:
                     render_milestone_card(item, card_type)
                     if card_type == "ready":
-                        if st.button("Claim Reward", key=f"claim_{item['id']}", width="stretch", type="primary"):
+                        if st.button("Claim Reward", key=f"claim_{item['id']}", use_container_width=True, type="primary"):
                             st.session_state.milestone_claims[item["id"]] = datetime.date.today().isoformat()
                             if item["reward_xp"] > 0:
                                 add_xp(item["reward_xp"], "Milestone Reward", "N/A", item["title"])
@@ -3697,7 +3633,7 @@ def render_journal_page():
             },
             "height": 320,
         },
-        width="stretch",
+        use_container_width=True,
     )
 
     filter_search_cols = get_responsive_column_count(1, 2, 2)
@@ -3748,13 +3684,17 @@ def render_journal_page():
             }
         )
 
-    st.dataframe(table_rows, width="stretch", hide_index=True)
+    st.dataframe(table_rows, use_container_width=True, hide_index=True)
 
 
 def render_parents_page(total_ayahs_memorized):
     st.markdown("## ⚙️ Parents")
     st.markdown("### 📊 Statistics")
-    revised_entries = sum(len(v) for v in st.session_state.revised_dates.values())
+    revised_entries = sum(
+        int(entry.get("stage", 0))
+        for surah_map in st.session_state.get("revision_schedule", {}).values()
+        for entry in surah_map.values()
+    )
     parent_stats = [
         ("✨ Total XP", st.session_state.xp),
         ("📖 Total Ayahs Memorized", total_ayahs_memorized),
@@ -3769,16 +3709,16 @@ def render_parents_page(total_ayahs_memorized):
                 st.metric(label, value)
 
     st.markdown("### 📚 Manage Quran")
-    st.caption("Select Surahs to assign. Only assigned Surahs will be shown on the Memorization & Revision page.")
+    st.caption("Select Surahs to assign. Only assigned Surahs will be shown on the Memorization page.")
 
     manage_btn_cols = get_responsive_column_count(1, 2, 2)
     if manage_btn_cols == 1:
-        if st.button("Assign All Surahs", width="stretch"):
+        if st.button("Assign All Surahs", use_container_width=True):
             st.session_state.assigned_surahs = SURAH_LIST.copy()
             ensure_selection_state()
             st.success("All Surahs assigned.")
             st.rerun()
-        if st.button("Keep Only Last 10 Surahs", width="stretch"):
+        if st.button("Keep Only Last 10 Surahs", use_container_width=True):
             st.session_state.assigned_surahs = SURAH_LIST[-10:]
             ensure_selection_state()
             st.success("Assigned last 10 Surahs.")
@@ -3786,13 +3726,13 @@ def render_parents_page(total_ayahs_memorized):
     else:
         quran_col1, quran_col2 = st.columns([1, 1])
         with quran_col1:
-            if st.button("Assign All Surahs", width="stretch"):
+            if st.button("Assign All Surahs", use_container_width=True):
                 st.session_state.assigned_surahs = SURAH_LIST.copy()
                 ensure_selection_state()
                 st.success("All Surahs assigned.")
                 st.rerun()
         with quran_col2:
-            if st.button("Keep Only Last 10 Surahs", width="stretch"):
+            if st.button("Keep Only Last 10 Surahs", use_container_width=True):
                 st.session_state.assigned_surahs = SURAH_LIST[-10:]
                 ensure_selection_state()
                 st.success("Assigned last 10 Surahs.")
@@ -3856,7 +3796,7 @@ def render_parents_page(total_ayahs_memorized):
             table_rows.append(row)
 
         if table_rows:
-            st.dataframe(table_rows, width="stretch", hide_index=True)
+            st.dataframe(table_rows, use_container_width=True, hide_index=True)
         else:
             st.info("No milestones match the selected filter.")
 
@@ -3956,7 +3896,7 @@ def render_parents_page(total_ayahs_memorized):
             if already_claimed and rule_change:
                 confirm_rule_change = st.checkbox("I confirm I want to change goal type/target for this claimed milestone.")
 
-            if st.button("Save Milestone Updates", width="stretch", type="primary"):
+            if st.button("Save Milestone Updates", use_container_width=True, type="primary"):
                 title_clean = str(updated_title or "").strip()
                 reward_clean = str(updated_reward or "").strip() or "🎁 Custom Reward"
                 if not title_clean:
@@ -4004,7 +3944,7 @@ def render_parents_page(total_ayahs_memorized):
                 st.warning("This milestone has been claimed before.")
 
             confirm_remove = st.checkbox("I confirm this remove action.", key="milestone_remove_confirm")
-            if st.button("Apply Remove", width="stretch", disabled=not confirm_remove):
+            if st.button("Apply Remove", use_container_width=True, disabled=not confirm_remove):
                 if remove_mode == "Soft remove (archive/inactive)":
                     remove_record["is_active"] = False
                     remove_record["updated_at"] = datetime.date.today().isoformat()
@@ -4037,7 +3977,7 @@ def render_parents_page(total_ayahs_memorized):
         import_mode = st.radio("Import mode", ["Replace", "Merge by ID"], horizontal=True)
         import_claims = st.checkbox("Import claim history", value=True)
         uploaded_file = st.file_uploader("Upload milestone JSON", type=["json"], key="milestone_import_file")
-        if st.button("Apply Import", width="stretch", type="primary"):
+        if st.button("Apply Import", use_container_width=True, type="primary"):
             if not uploaded_file:
                 st.error("Please upload a JSON file first.")
             else:
@@ -4084,6 +4024,7 @@ def render_parents_page(total_ayahs_memorized):
         "recent_praise": st.session_state.recent_praise,
         "memorized": st.session_state.memorized,
         "revised_dates": st.session_state.revised_dates,
+        "revision_schedule": st.session_state.get("revision_schedule", {}),
         "assigned_surahs": st.session_state.assigned_surahs,
         "milestone_version": st.session_state.milestone_version,
         "milestone_catalog": st.session_state.milestone_catalog,
@@ -4126,6 +4067,8 @@ def render_parents_page(total_ayahs_memorized):
 ensure_selection_state()
 today = datetime.date.today()
 apply_inactivity_penalty_if_needed(today)
+ensure_revision_schedule(today)
+apply_overdue_penalties_once(today)
 current_level, level_title, surahs_completed, juz_completion_pct, total_ayahs_memorized = get_summary_metrics()
 
 render_sidebar_profile(
@@ -4149,8 +4092,10 @@ if selected_page == "🏠 Dashboard":
         get_milestone_items,
         ui_tier=get_ui_tier(),
     )
-elif selected_page == "📖 Memorization & Revision":
-    render_memorization_revision_page(today)
+elif selected_page == "📖 Memorization":
+    memorization_page.render_memorization_page(today)
+elif selected_page == "🔁 Revision":
+    revision_page.render_revision_page(today)
 elif selected_page == "🏆 Achievements & Rewards":
     render_achievements_rewards_page(current_level, level_title, surahs_completed, juz_completion_pct, total_ayahs_memorized)
 elif selected_page == "📜 Journal":

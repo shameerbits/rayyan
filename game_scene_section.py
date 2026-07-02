@@ -50,7 +50,7 @@ def build_game_hero_scene_html(
                     <div class="road-strip single"></div>
                 </div>
 
-                <div class="game-rider">{character_icon}</div>
+                <div class="game-rider" style="left:{rider_target:.1f}%">{character_icon}</div>
 
             </div>
         </div>
