@@ -125,6 +125,9 @@ def load_app_state() -> None:
 
 def save_app_state() -> None:
     """Persist all tracked session-state keys to SQLite."""
+    # Do not overwrite good persisted data with session defaults if load failed.
+    if st.session_state.get(LOAD_ERROR_SESSION_KEY):
+        return
     try:
         state = {
             key: st.session_state[key]
@@ -3755,31 +3758,35 @@ def render_parents_page(total_ayahs_memorized):
     st.markdown("### 📚 Manage Quran")
     st.caption("Select Surahs to assign. Only assigned Surahs will be shown on the Memorization page.")
 
-    manage_btn_cols = get_responsive_column_count(1, 2, 2)
-    if manage_btn_cols == 1:
-        if st.button("Assign All Surahs", use_container_width=True):
-            st.session_state.assigned_surahs = SURAH_LIST.copy()
-            ensure_selection_state()
-            st.success("All Surahs assigned.")
+    # Quick-action buttons with a confirmation step to prevent accidental overwrites.
+    _confirm_action = st.session_state.get("_confirm_quran_action")
+    qbtn_col1, qbtn_col2 = st.columns(2)
+    with qbtn_col1:
+        if st.button("Assign All Surahs (114)", use_container_width=True):
+            st.session_state["_confirm_quran_action"] = "all"
             st.rerun()
-        if st.button("Keep Only Last 10 Surahs", use_container_width=True):
-            st.session_state.assigned_surahs = SURAH_LIST[-10:]
-            ensure_selection_state()
-            st.success("Assigned last 10 Surahs.")
+    with qbtn_col2:
+        if st.button("Last 10 Surahs Only", use_container_width=True):
+            st.session_state["_confirm_quran_action"] = "last10"
             st.rerun()
-    else:
-        quran_col1, quran_col2 = st.columns([1, 1])
-        with quran_col1:
-            if st.button("Assign All Surahs", use_container_width=True):
-                st.session_state.assigned_surahs = SURAH_LIST.copy()
+
+    if _confirm_action:
+        _action_label = "all 114 Surahs" if _confirm_action == "all" else "the last 10 Surahs"
+        st.warning(f"⚠️ This will replace the current assignment with {_action_label}. Are you sure?")
+        _conf1, _conf2 = st.columns(2)
+        with _conf1:
+            if st.button("✅ Yes, apply", type="primary", use_container_width=True, key="confirm_quran_yes"):
+                if _confirm_action == "all":
+                    st.session_state.assigned_surahs = SURAH_LIST.copy()
+                else:
+                    st.session_state.assigned_surahs = SURAH_LIST[-10:]
+                st.session_state.pop("_confirm_quran_action", None)
                 ensure_selection_state()
-                st.success("All Surahs assigned.")
+                st.success("Surah assignment updated.")
                 st.rerun()
-        with quran_col2:
-            if st.button("Keep Only Last 10 Surahs", use_container_width=True):
-                st.session_state.assigned_surahs = SURAH_LIST[-10:]
-                ensure_selection_state()
-                st.success("Assigned last 10 Surahs.")
+        with _conf2:
+            if st.button("❌ Cancel", use_container_width=True, key="confirm_quran_no"):
+                st.session_state.pop("_confirm_quran_action", None)
                 st.rerun()
 
     assigned_default = get_assigned_surahs()
