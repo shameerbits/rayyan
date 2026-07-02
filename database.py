@@ -27,12 +27,27 @@ _LEGACY_JSON_BAK = os.path.join(DB_DIR, "app_state.json.bak")
 # Create a private storage bucket named "rayyan-data" in your Supabase project.
 # ---------------------------------------------------------------------------
 
+# Last sync status — readable by app.py for diagnostics
+_cloud_sync_status: dict = {
+    "pull": "not_run",   # "ok" | "no_file" | "error:<msg>" | "not_configured"
+    "push": "not_run",   # "ok" | "error:<msg>" | "not_configured"
+    "last_push_at": None,
+    "last_pull_at": None,
+}
+
+
+def get_cloud_sync_status() -> dict:
+    """Return a copy of the last cloud sync status for diagnostics."""
+    return dict(_cloud_sync_status)
+
+
 def _cloud_pull_db() -> None:
     """Download rayyan.db from Supabase Storage before the first DB open."""
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     key = os.environ.get("SUPABASE_KEY", "")
     bucket = os.environ.get("SUPABASE_BUCKET", "rayyan-data")
     if not url or not key:
+        _cloud_sync_status["pull"] = "not_configured"
         return
     endpoint = f"{url}/storage/v1/object/{bucket}/rayyan.db"
     try:
@@ -44,8 +59,15 @@ def _cloud_pull_db() -> None:
         with urllib.request.urlopen(req, timeout=15) as resp:
             with open(DB_PATH, "wb") as fh:
                 fh.write(resp.read())
-    except Exception:
-        pass  # Not yet uploaded, or not configured — start fresh locally
+        _cloud_sync_status["pull"] = "ok"
+        _cloud_sync_status["last_pull_at"] = datetime.datetime.utcnow().isoformat()
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            _cloud_sync_status["pull"] = "no_file"  # First boot — normal
+        else:
+            _cloud_sync_status["pull"] = f"error:HTTP {e.code} {e.reason}"
+    except Exception as e:
+        _cloud_sync_status["pull"] = f"error:{type(e).__name__}: {e}"
 
 
 def _cloud_push_db() -> None:
@@ -53,7 +75,11 @@ def _cloud_push_db() -> None:
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     key = os.environ.get("SUPABASE_KEY", "")
     bucket = os.environ.get("SUPABASE_BUCKET", "rayyan-data")
-    if not url or not key or not os.path.isfile(DB_PATH):
+    if not url or not key:
+        _cloud_sync_status["push"] = "not_configured"
+        return
+    if not os.path.isfile(DB_PATH):
+        _cloud_sync_status["push"] = "error:DB file not found"
         return
     endpoint = f"{url}/storage/v1/object/{bucket}/rayyan.db"
     try:
@@ -72,8 +98,12 @@ def _cloud_push_db() -> None:
         )
         with urllib.request.urlopen(req, timeout=30):
             pass
-    except Exception:
-        pass  # Never let cloud sync failure break the app
+        _cloud_sync_status["push"] = "ok"
+        _cloud_sync_status["last_push_at"] = datetime.datetime.utcnow().isoformat()
+    except urllib.error.HTTPError as e:
+        _cloud_sync_status["push"] = f"error:HTTP {e.code} {e.reason}"
+    except Exception as e:
+        _cloud_sync_status["push"] = f"error:{type(e).__name__}: {e}"
 
 
 # ---------------------------------------------------------------------------

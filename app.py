@@ -3810,6 +3810,53 @@ def render_parents_page(total_ayahs_memorized):
 
     st.info(f"Currently assigned: {len(get_assigned_surahs())} / {len(SURAH_LIST)} Surahs")
 
+    # ------------------------------------------------------------------
+    # Cloud Sync Diagnostics
+    # ------------------------------------------------------------------
+    st.markdown("### ☁️ Cloud Sync Status")
+    _sync = database.get_cloud_sync_status()
+    _pull_status = _sync.get("pull", "not_run")
+    _push_status = _sync.get("push", "not_run")
+    _pull_at = _sync.get("last_pull_at") or "—"
+    _push_at = _sync.get("last_push_at") or "—"
+
+    def _sync_badge(status: str) -> str:
+        if status == "ok":
+            return "✅ OK"
+        if status == "no_file":
+            return "🆕 No file yet (first boot)"
+        if status == "not_configured":
+            return "⚠️ Not configured (env vars missing)"
+        if status == "not_run":
+            return "⏳ Not run yet"
+        return f"❌ {status}"
+
+    _sc1, _sc2 = st.columns(2)
+    with _sc1:
+        st.markdown(f"**Pull on startup:** {_sync_badge(_pull_status)}")
+        st.caption(f"Last pull: {_pull_at}")
+    with _sc2:
+        st.markdown(f"**Push after save:** {_sync_badge(_push_status)}")
+        st.caption(f"Last push: {_push_at}")
+
+    if "error:" in _pull_status or "error:" in _push_status:
+        st.error(
+            "Cloud sync error detected. Common fixes:\n"
+            "- Check that `SUPABASE_URL` and `SUPABASE_KEY` are set correctly in Streamlit secrets\n"
+            "- Make sure the bucket name matches (default: `rayyan-data`)\n"
+            "- Use the **service_role** key, not the anon key\n"
+            f"\nPull: `{_pull_status}`\nPush: `{_push_status}`"
+        )
+    elif _pull_status == "not_configured" or _push_status == "not_configured":
+        st.warning(
+            "Supabase env vars not found. The database will reset on every reboot.\n"
+            "Add `SUPABASE_URL` and `SUPABASE_KEY` to Streamlit Cloud secrets."
+        )
+
+    if st.button("🔄 Force Push DB to Cloud Now", use_container_width=True):
+        database._cloud_push_db()
+        st.rerun()
+
     st.markdown("### 🏆 Manage Milestones")
     st.caption("Parents can add, update, archive, or remove milestones that combine achievements and rewards.")
 
