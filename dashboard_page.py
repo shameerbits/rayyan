@@ -823,25 +823,6 @@ def render_dashboard_page(
             font-weight: 700;
             line-height: 1.32;
         }
-        .game-level-badge {
-            min-width: 180px;
-            border-radius: 20px;
-            border: 2px solid #f2cc79;
-            background: linear-gradient(165deg, #fff8de 0%, #ffe8a6 46%, #f0c76f 100%);
-            box-shadow: inset 0 2px 8px rgba(255, 255, 255, 0.5), 0 12px 22px rgba(117, 84, 30, 0.25);
-            padding: 10px 14px;
-            text-align: center;
-            position: relative;
-        }
-        .game-level-badge::before {
-            content: "★";
-            position: absolute;
-            top: -10px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: #f0a911;
-            font-size: 1rem;
-        }
         .game-level-icon { margin: 0; font-size: 1.15rem; }
         .game-level-number { margin: 2px 0 0 0; font-size: 1.45rem; color: #6a4509; font-weight: 900; }
         .game-level-name { margin: 2px 0 0 0; font-size: 0.82rem; color: #7a5315; font-weight: 800; }

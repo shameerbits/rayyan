@@ -2141,6 +2141,30 @@ st.markdown("""
             padding: 6px 10px;
         }
     }
+
+    /* ── Sidebar game-level badge (used on every page) ── */
+    .game-level-badge {
+        min-width: 180px;
+        border-radius: 20px;
+        border: 2px solid #f2cc79;
+        background: linear-gradient(165deg, #fff8de 0%, #ffe8a6 46%, #f0c76f 100%);
+        box-shadow: inset 0 2px 8px rgba(255, 255, 255, 0.5), 0 12px 22px rgba(117, 84, 30, 0.25);
+        padding: 10px 14px;
+        text-align: center;
+        position: relative;
+    }
+    .game-level-badge::before {
+        content: "★";
+        position: absolute;
+        top: -10px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #f0a911;
+        font-size: 1rem;
+    }
+    .game-level-icon { margin: 0; font-size: 1.15rem; }
+    .game-level-number { margin: 2px 0 0 0; font-size: 1.45rem; color: #6a4509; font-weight: 900; }
+    .game-level-name  { margin: 2px 0 0 0; font-size: 0.82rem; color: #7a5315; font-weight: 800; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -3105,9 +3129,11 @@ def render_sidebar_profile(
         st.markdown("""
         💡 **Point Rules**
         - 🟢 **+5 Points** for every **new Ayah memorized**
-        - 🔵 **+2 Points** for every **Ayah revised**
+        - 🔵 **+2 Points** for every **Ayah revised** (scheduled revision)
+        - 🎯 **+1 Point** for every **Ayah practiced** (free practice, once per Ayah per day)
         - 🔥 Keep your daily streak alive by memorizing **at least 1 Ayah** or doing a revision every day.
         - 🔴 **−10 Points** every day you don't memorize or revise after **2 consecutive inactive days**.
+        - ⚠️ **−5 Points** per Ayah that goes **overdue** (missed revision by more than 3 days).
         """)
         st.markdown("---")
         tier_labels = {
@@ -3686,6 +3712,24 @@ def render_journal_page():
 
     st.dataframe(table_rows, use_container_width=True, hide_index=True)
 
+PAGE_PASSWORD = "rayyanisthebest"
+
+
+def check_page_password(page_key: str) -> bool:
+    """Show a password prompt and return True only when the correct password has been entered."""
+    unlocked_key = f"_unlocked_{page_key}"
+    if st.session_state.get(unlocked_key):
+        return True
+    st.markdown("### 🔒 Password Required")
+    pwd = st.text_input("Enter password to continue:", type="password", key=f"_pwd_input_{page_key}")
+    if st.button("Unlock", key=f"_pwd_btn_{page_key}"):
+        if pwd == PAGE_PASSWORD:
+            st.session_state[unlocked_key] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password. Please try again.")
+    return False
+
 
 def render_parents_page(total_ayahs_memorized):
     st.markdown("## ⚙️ Parents")
@@ -4097,11 +4141,13 @@ elif selected_page == "📖 Memorization":
 elif selected_page == "🔁 Revision":
     revision_page.render_revision_page(today)
 elif selected_page == "🏆 Achievements & Rewards":
-    render_achievements_rewards_page(current_level, level_title, surahs_completed, juz_completion_pct, total_ayahs_memorized)
+    if check_page_password("achievements"):
+        render_achievements_rewards_page(current_level, level_title, surahs_completed, juz_completion_pct, total_ayahs_memorized)
 elif selected_page == "📜 Journal":
     render_journal_page()
 elif selected_page == "⚙️ Parents":
-    render_parents_page(total_ayahs_memorized)
+    if check_page_password("parents"):
+        render_parents_page(total_ayahs_memorized)
 
 # Persist state at the end of every successful script run.
 save_app_state()
