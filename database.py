@@ -9,6 +9,7 @@ import datetime
 import json
 import os
 import sqlite3
+import urllib.request
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -19,6 +20,61 @@ DB_PATH = os.path.join(DB_DIR, "rayyan.db")
 
 _LEGACY_JSON = os.path.join(DB_DIR, "app_state.json")
 _LEGACY_JSON_BAK = os.path.join(DB_DIR, "app_state.json.bak")
+
+# ---------------------------------------------------------------------------
+# Cloud Storage sync (Supabase Storage — optional, falls back to local SQLite)
+# Set SUPABASE_URL and SUPABASE_KEY in Streamlit secrets or environment vars.
+# Create a private storage bucket named "rayyan-data" in your Supabase project.
+# ---------------------------------------------------------------------------
+
+def _cloud_pull_db() -> None:
+    """Download rayyan.db from Supabase Storage before the first DB open."""
+    url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    key = os.environ.get("SUPABASE_KEY", "")
+    bucket = os.environ.get("SUPABASE_BUCKET", "rayyan-data")
+    if not url or not key:
+        return
+    endpoint = f"{url}/storage/v1/object/{bucket}/rayyan.db"
+    try:
+        req = urllib.request.Request(
+            endpoint,
+            headers={"apikey": key, "Authorization": f"Bearer {key}"},
+        )
+        os.makedirs(DB_DIR, exist_ok=True)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            with open(DB_PATH, "wb") as fh:
+                fh.write(resp.read())
+    except Exception:
+        pass  # Not yet uploaded, or not configured — start fresh locally
+
+
+def _cloud_push_db() -> None:
+    """Upload rayyan.db to Supabase Storage after every successful save."""
+    url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    key = os.environ.get("SUPABASE_KEY", "")
+    bucket = os.environ.get("SUPABASE_BUCKET", "rayyan-data")
+    if not url or not key or not os.path.isfile(DB_PATH):
+        return
+    endpoint = f"{url}/storage/v1/object/{bucket}/rayyan.db"
+    try:
+        with open(DB_PATH, "rb") as fh:
+            data = fh.read()
+        req = urllib.request.Request(
+            endpoint,
+            data=data,
+            headers={
+                "apikey": key,
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/octet-stream",
+                "x-upsert": "true",
+            },
+            method="PUT",
+        )
+        with urllib.request.urlopen(req, timeout=30):
+            pass
+    except Exception:
+        pass  # Never let cloud sync failure break the app
+
 
 # ---------------------------------------------------------------------------
 # Low-level connection helper
@@ -113,6 +169,7 @@ _CREATE_TABLES_SQL = [
 
 def init_db() -> None:
     """Create all tables (if they don't exist) and migrate legacy JSON data."""
+    _cloud_pull_db()  # Restore DB from cloud before first open (no-op if not configured)
     conn = _open_connection()
     try:
         for sql in _CREATE_TABLES_SQL:
@@ -356,6 +413,7 @@ def save_state(state: dict) -> None:
             conn.commit()
         finally:
             conn.close()
+        _cloud_push_db()  # Sync to cloud after every successful save
     except Exception:
         pass
 
